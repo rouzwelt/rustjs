@@ -1,0 +1,26 @@
+[package]
+name = "rustjs"
+version = "0.0.0"
+description = "run js in rust"
+edition = "2021"
+license = "MIT"
+homepage = "https://github.com/rouzwelt/rustjs"
+repository = "https://github.com/rouzwelt/rustjs"
+
+[lib]
+name = "rustjs"
+path = "./src/lib.rs"
+
+[dependencies]
+serde_json = "1.0.116"
+futures = "0.3.30"
+reqwest = "0.11.20"
+tokio = { version = "1.37.0", features = ["full"] }
+deno_runtime = "0.155.0"
+deno_ast = { version = "0.37.1", features = ["transpiling"] }
+
+[lints.clippy]
+all = "warn"
+
+[package.metadata.docs.rs]
+all-features = true

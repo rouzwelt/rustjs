@@ -1,0 +1,8 @@
+.DS_Store
+.vscode
+
+# dotenv environment variables file
+.env
+
+# Generate output
+target
