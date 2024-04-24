@@ -24,6 +24,7 @@
         nativeBuildInputs = [
           rust-toolchain
           pkgs.cargo-release
+          pkgs.protobuf
           pkgs.llvm
           # pkgs.gmp
           # pkgs.openssl
