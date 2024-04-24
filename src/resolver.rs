@@ -5,20 +5,21 @@ use deno_runtime::deno_core::error::AnyError;
 use deno_runtime::deno_core::ModuleSpecifier;
 use deno_runtime::deno_node::{NpmResolver, NodePermissions, NodeResolutionMode};
 
-/// A very basic deno npm resolver, work with a provided node_modules path
+/// A very basic deno npm resolver, works with a provided node_modules path
 /// which is checked against in the NpmResolver trait implementation
 /// it allows read permission for all files
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BasicNpmResolver {
     pub node_modules_path: ModuleSpecifier,
 }
 
 impl BasicNpmResolver {
     /// creates a new instance from the given 'directory' path
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<BasicNpmResolver, Error> {
+    /// uses [ModuleSpecifier::from_directory_path]
+    pub fn new(path: &str) -> Result<BasicNpmResolver, Error> {
         Ok(BasicNpmResolver {
             node_modules_path: ModuleSpecifier::from_directory_path(path)
-                .map_err(|_e| Error::FailedToParseFilePathToUrl)?,
+                .map_err(|_| Error::FailedToParseFilePathToUrl(path.to_owned()))?,
         })
     }
 }
