@@ -67,17 +67,17 @@ mod tests {
         assert!(!should_not_be_in_node_modules);
 
         let test_path =
-            ModuleSpecifier::from_file_path("/path/to/node_modules/some_dir/file.js").unwrap();
+            ModuleSpecifier::from_file_path("/path/to/node_modules/some_lib/file.js").unwrap();
         let should_be_in_node_modules = basic_npm_resolver.in_npm_package(&test_path);
         assert!(should_be_in_node_modules);
 
         let package_folder_path = basic_npm_resolver.resolve_package_folder_from_package(
-            "some_lib",
+            "some_other_lib",
             &test_path,
             NodeResolutionMode::Execution,
         )?;
         let expected_package_folder_path =
-            PathBuf::from_str("/path/to/node_modules/some_lib").unwrap();
+            PathBuf::from_str("/path/to/node_modules/some_other_lib").unwrap();
         assert_eq!(package_folder_path, expected_package_folder_path);
 
         Ok(())
