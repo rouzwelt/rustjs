@@ -1,0 +1,17 @@
+name: Test CI
+on: [push]
+
+jobs:
+  fmt-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@v4
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+
+      - name: fmt
+        run: nix develop -c cargo fmt
+
+      - name: test
+        run: nix develop -c cargo test

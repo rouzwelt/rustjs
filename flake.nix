@@ -34,6 +34,8 @@
         ]
         ++ (pkgs.lib.optionals pkgs.stdenv.isDarwin [
           pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+          pkgs.darwin.apple_sdk.frameworks.CoreServices
+          pkgs.darwin.apple_sdk.frameworks.QuartzCore
           # pkgs.darwin.apple_sdk.frameworks.AppKit
           # pkgs.darwin.apple_sdk.frameworks.WebKit
         ]);
