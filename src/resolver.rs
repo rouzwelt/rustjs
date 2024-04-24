@@ -10,13 +10,16 @@ use deno_runtime::deno_node::{NpmResolver, NodePermissions, NodeResolutionMode};
 /// it allows read permission for all files
 #[derive(Debug)]
 pub struct BasicNpmResolver {
-    pub node_modules_path: ModuleSpecifier
+    pub node_modules_path: ModuleSpecifier,
 }
 
 impl BasicNpmResolver {
     /// creates a new instance from the given 'directory' path
     pub fn new<P: AsRef<Path>>(path: P) -> Result<BasicNpmResolver, Error> {
-        Ok(BasicNpmResolver { node_modules_path: ModuleSpecifier::from_directory_path(path).map_err(|_e| Error::FailedToParseFilePathToUrl)? })
+        Ok(BasicNpmResolver {
+            node_modules_path: ModuleSpecifier::from_directory_path(path)
+                .map_err(|_e| Error::FailedToParseFilePathToUrl)?,
+        })
     }
 }
 
@@ -36,11 +39,16 @@ impl NpmResolver for BasicNpmResolver {
         _referrer: &ModuleSpecifier,
         _mode: NodeResolutionMode,
     ) -> Result<PathBuf, AnyError> {
-        self.node_modules_path.join(specifier)?.to_file_path().map_err(|_e| anyhow!("falied to convert to file path"))
+        self.node_modules_path
+            .join(specifier)?
+            .to_file_path()
+            .map_err(|_e| anyhow!("falied to convert to file path"))
     }
 
     fn in_npm_package(&self, specifier: &ModuleSpecifier) -> bool {
-        specifier.as_str().starts_with(self.node_modules_path.as_str())
+        specifier
+            .as_str()
+            .starts_with(self.node_modules_path.as_str())
     }
 }
 
@@ -58,12 +66,18 @@ mod tests {
         let should_not_be_in_node_modules = basic_npm_resolver.in_npm_package(&test_path);
         assert!(!should_not_be_in_node_modules);
 
-        let test_path = ModuleSpecifier::from_file_path("/path/to/node_modules/some_dir/file.js").unwrap();
+        let test_path =
+            ModuleSpecifier::from_file_path("/path/to/node_modules/some_dir/file.js").unwrap();
         let should_be_in_node_modules = basic_npm_resolver.in_npm_package(&test_path);
         assert!(should_be_in_node_modules);
 
-        let package_folder_path = basic_npm_resolver.resolve_package_folder_from_package("some_lib", &test_path, NodeResolutionMode::Execution)?;
-        let expected_package_folder_path = PathBuf::from_str("/path/to/node_modules/some_lib").unwrap();
+        let package_folder_path = basic_npm_resolver.resolve_package_folder_from_package(
+            "some_lib",
+            &test_path,
+            NodeResolutionMode::Execution,
+        )?;
+        let expected_package_folder_path =
+            PathBuf::from_str("/path/to/node_modules/some_lib").unwrap();
         assert_eq!(package_folder_path, expected_package_folder_path);
 
         Ok(())
