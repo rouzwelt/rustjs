@@ -15,4 +15,7 @@ pub enum Error {
 
     #[error("duplicate side modules names: {0}")]
     DuplicateSideModules(String),
+
+    #[error(transparent)]
+    SerdeV8Error(#[from] deno_runtime::deno_core::serde_v8::Error),
 }

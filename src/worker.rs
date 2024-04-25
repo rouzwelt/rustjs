@@ -1,48 +1,68 @@
-use crate::error::Error;
-use std::{rc::Rc, sync::Arc, collections::HashMap};
+use std::{rc::Rc, sync::Arc};
 use crate::resolver::BasicNpmResolver;
+use crate::{
+    error::Error,
+    module::{JsModule, ModuleInitializer, JsModuleType},
+};
 use deno_runtime::{
+    deno_core::{serde_v8::from_v8, Extension, FsModuleLoader, ModuleSpecifier},
+    deno_napi::v8::GetPropertyNamesArgs,
     permissions::PermissionsContainer,
     worker::{MainWorker, WorkerOptions},
-    deno_core::{Extension, FsModuleLoader, ModuleId, ModuleSpecifier},
 };
+
+/// options for instantiating a [JsWorker]
+#[derive(Debug, Clone)]
+pub struct JsWorkerInitOptions {
+    pub main_module_initializer: ModuleInitializer,
+    pub node_modules_url: Option<ModuleSpecifier>,
+}
 
 /// The main struct that wraps the deno js runtime and provides methods to easily load js modules
 /// and interact with them
 pub struct JsWorker {
-    pub main_worker: MainWorker,
-    pub node_modules_path: Option<ModuleSpecifier>,
-    pub main_module_id: ModuleId,
-    pub side_modules_ids: HashMap<String, ModuleId>,
+    pub(crate) main_worker: MainWorker,
+    pub(crate) main_module: JsModule,
+    pub(crate) node_modules_url: Option<ModuleSpecifier>,
 }
 
 impl JsWorker {
+    /// get main worker [MainWorker] of this instance
+    pub fn main_worker(&mut self) -> &mut MainWorker {
+        &mut self.main_worker
+    }
+
+    /// get main module [JsModule] of this instance
+    pub fn main_module(&self) -> &JsModule {
+        &self.main_module
+    }
+
+    /// get node_modules url of this instance
+    pub fn node_modules_url(&self) -> Option<ModuleSpecifier> {
+        self.node_modules_url.clone()
+    }
+
     /// creates a new instance, if no path node_modules is provided, it will default to
     /// main_module_path/node_modules
     pub async fn init(
-        main_module_path: &str,
-        node_modules_path: Option<&str>,
-        side_modules_paths: Option<HashMap<String, String>>,
+        options: JsWorkerInitOptions,
         extensions: Option<Vec<Extension>>,
     ) -> Result<JsWorker, Error> {
-        let main_module = ModuleSpecifier::from_file_path(main_module_path)
-            .map_err(|_| Error::FailedToParseFilePathToUrl(main_module_path.to_owned()))?;
-
-        let mut opts_node_modules_path = None;
-        let node_modules_path = if let Some(p) = node_modules_path {
-            let url = ModuleSpecifier::from_file_path(p)
-                .map_err(|_| Error::FailedToParseFilePathToUrl(p.to_owned()))?;
-            opts_node_modules_path = Some(url.clone());
-            url
+        let node_modules_path = if let Some(p) = &options.node_modules_url {
+            p.clone()
         } else {
-            main_module
-                .join("node_modules")
-                .map_err(Into::<Error>::into)?
+            options
+                .main_module_initializer
+                .url
+                .join("..")?
+                .join("node_modules")?
         };
 
-        let basic_npm_resolver = BasicNpmResolver { node_modules_path };
+        let basic_npm_resolver = BasicNpmResolver {
+            node_modules_url: node_modules_path,
+        };
         let mut main_worker = MainWorker::bootstrap_from_options(
-            main_module.clone(),
+            options.main_module_initializer.url.clone(),
             PermissionsContainer::allow_all(),
             WorkerOptions {
                 module_loader: Rc::new(FsModuleLoader),
@@ -52,46 +72,141 @@ impl JsWorker {
             },
         );
 
-        // load require and put in globalThis to be accessible by all modules
-        let require_mod_id = main_worker
-            .js_runtime
-            .load_side_es_module_from_code(
-                &ModuleSpecifier::parse("ext:__requireLoader____")?,
-                format!(
-                    r#"import {{ createRequire as __internalCreateRequire____ }} from "node:module";
-globalThis.require = __internalCreateRequire____("{}");"#,
-                    main_module.as_str(),
-                ),
-            )
-            .await?;
-        main_worker.evaluate_module(require_mod_id).await?;
-        main_worker.run_event_loop(false).await?;
-
-        // load side modules
-        let mut side_modules_ids = HashMap::new();
-        for (mod_name, path) in side_modules_paths.unwrap_or_default() {
-            if side_modules_ids.contains_key(&mod_name) {
-                return Err(Error::DuplicateSideModules(mod_name));
-            }
-            let side_module = ModuleSpecifier::from_file_path(&path)
-                .map_err(|_| Error::FailedToParseFilePathToUrl(path.clone()))?;
-
-            let side_mod_id = main_worker.preload_main_module(&side_module).await?;
-            side_modules_ids.insert(mod_name, side_mod_id);
-            main_worker.evaluate_module(side_mod_id).await?;
-            main_worker.run_event_loop(false).await?;
-        }
-
         // load main module
-        let main_module_id = main_worker.preload_main_module(&main_module).await?;
+        let main_module_id = if options.main_module_initializer.mod_type == JsModuleType::Esm {
+            main_worker
+                .preload_main_module(&options.main_module_initializer.url)
+                .await?
+        } else {
+            // load require and put in globalThis to be accessible by all cjs modules
+            let require_mod_id = main_worker
+                .js_runtime
+                .load_side_es_module_from_code(
+                    &ModuleSpecifier::parse("ext:__requireLoader____")?,
+                    format!(
+                        r#"import {{ createRequire as __internalCreateRequire____ }} from "node:module";
+globalThis.require = __internalCreateRequire____("{}");"#,
+                        options.main_module_initializer.url.as_str(),
+                    ),
+                )
+                .await?;
+            main_worker.evaluate_module(require_mod_id).await?;
+
+            main_worker
+                .js_runtime
+                .load_side_es_module_from_code(
+                    &ModuleSpecifier::parse("ext:__cjsModuleLoader____")?,
+                    format!(
+                        r#"const allExports = require("{}"); export default allExports;"#,
+                        options.main_module_initializer.url.path()
+                    ),
+                )
+                .await?
+        };
         main_worker.evaluate_module(main_module_id).await?;
+
+        // run eventloop to finish
         main_worker.run_event_loop(false).await?;
+
+        // get export keys of main module
+        let exports = {
+            let mod_namespace = main_worker
+                .js_runtime
+                .get_module_namespace(main_module_id)?;
+            let mut scope = main_worker.js_runtime.handle_scope();
+            let mod_namespace = mod_namespace.open(&mut scope);
+            let names =
+                mod_namespace.get_property_names(&mut scope, GetPropertyNamesArgs::default());
+            if let Some(v) = names {
+                from_v8::<Vec<String>>(&mut scope, v.into())?
+            } else {
+                vec![]
+            }
+        };
 
         Ok(JsWorker {
             main_worker,
-            main_module_id,
-            side_modules_ids,
-            node_modules_path: opts_node_modules_path,
+            node_modules_url: options.node_modules_url,
+            main_module: JsModule {
+                id: main_module_id,
+                mod_type: options.main_module_initializer.mod_type,
+                exports,
+            },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::anyhow;
+
+    #[tokio::test]
+    async fn test_init_esm() -> anyhow::Result<()> {
+        let options = JsWorkerInitOptions {
+            main_module_initializer: ModuleInitializer {
+                mod_type: JsModuleType::Esm,
+                url: ModuleSpecifier::from_file_path(
+                    std::env::current_dir().unwrap().join("data/esm.js"),
+                )
+                .unwrap(),
+            },
+            node_modules_url: None,
+        };
+        let js_worker = JsWorker::init(options, None).await?;
+        let expected_exported_modules_keys = vec!["topFn".to_string()];
+
+        assert_eq!(
+            js_worker.main_module.exports,
+            expected_exported_modules_keys
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_init_cjs() -> anyhow::Result<()> {
+        let options = JsWorkerInitOptions {
+            main_module_initializer: ModuleInitializer {
+                mod_type: JsModuleType::Cjs,
+                url: ModuleSpecifier::from_file_path(
+                    std::env::current_dir().unwrap().join("data/cjs.js"),
+                )
+                .unwrap(),
+            },
+            node_modules_url: None,
+        };
+        let mut js_worker = JsWorker::init(options, None).await?;
+
+        // cjs modules always have default exports
+        let expected_exported_modules_keys = vec!["default".to_string()];
+        assert_eq!(
+            js_worker.main_module.exports,
+            expected_exported_modules_keys
+        );
+
+        // get the inner exports from the default export
+        let mod_namespace = js_worker
+            .main_worker
+            .js_runtime
+            .get_module_namespace(js_worker.main_module.id)?;
+        let mut scope = js_worker.main_worker.js_runtime.handle_scope();
+        let mod_namespace = mod_namespace.open(&mut scope);
+        let default_key = deno_runtime::deno_core::v8::String::new(&mut scope, "default")
+            .unwrap()
+            .into();
+        let default_export = mod_namespace
+            .get(&mut scope, default_key)
+            .unwrap()
+            .to_object(&mut scope)
+            .unwrap();
+        let inner_exports = default_export
+            .get_property_names(&mut scope, GetPropertyNamesArgs::default())
+            .unwrap();
+        let inner_exports = from_v8::<Vec<String>>(&mut scope, inner_exports.into()).unwrap();
+
+        let expected_inner_exported_modules_keys = vec!["topFn".to_string()];
+        assert_eq!(inner_exports, expected_inner_exported_modules_keys);
+
+        Ok(())
     }
 }

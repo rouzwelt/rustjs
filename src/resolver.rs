@@ -10,15 +10,15 @@ use deno_runtime::deno_node::{NpmResolver, NodePermissions, NodeResolutionMode};
 /// it allows read permission for all files
 #[derive(Debug, Clone)]
 pub struct BasicNpmResolver {
-    pub node_modules_path: ModuleSpecifier,
+    pub node_modules_url: ModuleSpecifier,
 }
 
 impl BasicNpmResolver {
     /// creates a new instance from the given 'directory' path
     /// uses [ModuleSpecifier::from_directory_path]
-    pub fn new(path: &str) -> Result<BasicNpmResolver, Error> {
+    pub fn new_from_str(path: &str) -> Result<BasicNpmResolver, Error> {
         Ok(BasicNpmResolver {
-            node_modules_path: ModuleSpecifier::from_directory_path(path)
+            node_modules_url: ModuleSpecifier::from_directory_path(path)
                 .map_err(|_| Error::FailedToParseFilePathToUrl(path.to_owned()))?,
         })
     }
@@ -40,7 +40,7 @@ impl NpmResolver for BasicNpmResolver {
         _referrer: &ModuleSpecifier,
         _mode: NodeResolutionMode,
     ) -> Result<PathBuf, AnyError> {
-        self.node_modules_path
+        self.node_modules_url
             .join(specifier)?
             .to_file_path()
             .map_err(|_e| anyhow!("falied to convert to file path"))
@@ -49,19 +49,19 @@ impl NpmResolver for BasicNpmResolver {
     fn in_npm_package(&self, specifier: &ModuleSpecifier) -> bool {
         specifier
             .as_str()
-            .starts_with(self.node_modules_path.as_str())
+            .starts_with(self.node_modules_url.as_str())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::anyhow;
     use std::str::FromStr;
-    use deno_runtime::deno_core::anyhow;
 
     #[test]
     fn test_basic_npm_resolver() -> anyhow::Result<()> {
-        let basic_npm_resolver = BasicNpmResolver::new("/path/to/node_modules")?;
+        let basic_npm_resolver = BasicNpmResolver::new_from_str("/path/to/node_modules")?;
 
         let test_path = ModuleSpecifier::from_file_path("/path/to/other_folder/file.js").unwrap();
         let should_not_be_in_node_modules = basic_npm_resolver.in_npm_package(&test_path);
