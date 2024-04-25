@@ -95,9 +95,9 @@ globalThis.require = __internalCreateRequire____("{}");"#,
             main_worker
                 .js_runtime
                 .load_side_es_module_from_code(
-                    &ModuleSpecifier::parse("ext:__cjsModuleLoader____")?,
+                    &ModuleSpecifier::parse("ext:__cjsMainModuleExporter____")?,
                     format!(
-                        r#"const allExports = require("{}"); export default allExports;"#,
+                        r#"const __moduleExports____ = require("{}"); export default __moduleExports____;"#,
                         options.main_module_initializer.url.path()
                     ),
                 )
