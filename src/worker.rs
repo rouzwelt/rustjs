@@ -152,6 +152,33 @@ globalThis.require = __internalCreateRequire____("{}");"#,
             },
         })
     }
+
+    /// get module object instance
+    pub fn get_main_module_instance(&mut self) -> Result<v8::Global<v8::Object>, Error> {
+        let mod_namespace = self
+            .main_worker
+            .js_runtime
+            .get_module_namespace(self.main_module.id)?;
+        Ok(mod_namespace)
+    }
+
+    /// get the export value
+    pub fn get_export(&mut self, name: &str) -> Result<v8::Global<v8::Value>, Error> {
+        if !self.main_module.export_exists(name) {
+            return Err(Error::UndefinedExport);
+        }
+
+        let module = self.get_main_module_instance()?;
+        let mut scope = self.main_worker.js_runtime.handle_scope();
+        let module = module.open(&mut scope);
+
+        let key = v8::String::new(&mut scope, name).ok_or(Error::FailedToGetV8Value)?;
+        let value = module
+            .get(&mut scope, key.into())
+            .ok_or(Error::FailedToGetV8Value)?;
+
+        Ok(v8::Global::new(&mut scope, value))
+    }
 }
 
 #[cfg(test)]

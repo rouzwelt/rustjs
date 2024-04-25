@@ -21,4 +21,7 @@ pub enum Error {
 
     #[error("failed to get js value")]
     FailedToGetV8Value,
+
+    #[error("undefined export")]
+    UndefinedExport,
 }

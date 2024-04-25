@@ -19,8 +19,8 @@ pub struct JsModule {
 }
 
 impl JsModule {
-    pub fn export_exists(&self, key: &String) -> bool {
-        self.exports.contains(key)
+    pub fn export_exists(&self, key: &str) -> bool {
+        self.exports.contains(&key.to_string())
     }
 }
 
