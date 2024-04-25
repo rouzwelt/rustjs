@@ -18,4 +18,7 @@ pub enum Error {
 
     #[error(transparent)]
     SerdeV8Error(#[from] deno_runtime::deno_core::serde_v8::Error),
+
+    #[error("failed to get js value")]
+    FailedToGetV8Value,
 }

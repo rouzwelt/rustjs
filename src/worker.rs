@@ -5,7 +5,7 @@ use crate::{
     module::{JsModule, ModuleInitializer, JsModuleType},
 };
 use deno_runtime::{
-    deno_core::{serde_v8::from_v8, Extension, FsModuleLoader, ModuleSpecifier},
+    deno_core::{v8, serde_v8::from_v8, Extension, FsModuleLoader, ModuleSpecifier},
     deno_napi::v8::GetPropertyNamesArgs,
     permissions::PermissionsContainer,
     worker::{MainWorker, WorkerOptions},
@@ -115,12 +115,30 @@ globalThis.require = __internalCreateRequire____("{}");"#,
                 .get_module_namespace(main_module_id)?;
             let mut scope = main_worker.js_runtime.handle_scope();
             let mod_namespace = mod_namespace.open(&mut scope);
-            let names =
-                mod_namespace.get_property_names(&mut scope, GetPropertyNamesArgs::default());
-            if let Some(v) = names {
-                from_v8::<Vec<String>>(&mut scope, v.into())?
+            if options.main_module_initializer.mod_type == JsModuleType::Esm {
+                let names =
+                    mod_namespace.get_property_names(&mut scope, GetPropertyNamesArgs::default());
+                if let Some(v) = names {
+                    from_v8::<Vec<String>>(&mut scope, v.into())?
+                } else {
+                    vec![]
+                }
             } else {
-                vec![]
+                let mut all_exports = vec!["default".to_string()];
+                let default_key = v8::String::new(&mut scope, "default")
+                    .ok_or(Error::FailedToGetV8Value)?
+                    .into();
+                let default_export = mod_namespace
+                    .get(&mut scope, default_key)
+                    .ok_or(Error::FailedToGetV8Value)?
+                    .to_object(&mut scope)
+                    .ok_or(Error::FailedToGetV8Value)?;
+                let inner_exports = default_export
+                    .get_property_names(&mut scope, GetPropertyNamesArgs::default())
+                    .ok_or(Error::FailedToGetV8Value)?;
+                let inner_exports = from_v8::<Vec<String>>(&mut scope, inner_exports.into())?;
+                all_exports.extend_from_slice(&inner_exports);
+                all_exports
             }
         };
 
@@ -175,37 +193,14 @@ mod tests {
             },
             node_modules_url: None,
         };
-        let mut js_worker = JsWorker::init(options, None).await?;
+        let js_worker = JsWorker::init(options, None).await?;
 
         // cjs modules always have default exports
-        let expected_exported_modules_keys = vec!["default".to_string()];
+        let expected_exported_modules_keys = vec!["default".to_string(), "topFn".to_string()];
         assert_eq!(
             js_worker.main_module.exports,
             expected_exported_modules_keys
         );
-
-        // get the inner exports from the default export
-        let mod_namespace = js_worker
-            .main_worker
-            .js_runtime
-            .get_module_namespace(js_worker.main_module.id)?;
-        let mut scope = js_worker.main_worker.js_runtime.handle_scope();
-        let mod_namespace = mod_namespace.open(&mut scope);
-        let default_key = deno_runtime::deno_core::v8::String::new(&mut scope, "default")
-            .unwrap()
-            .into();
-        let default_export = mod_namespace
-            .get(&mut scope, default_key)
-            .unwrap()
-            .to_object(&mut scope)
-            .unwrap();
-        let inner_exports = default_export
-            .get_property_names(&mut scope, GetPropertyNamesArgs::default())
-            .unwrap();
-        let inner_exports = from_v8::<Vec<String>>(&mut scope, inner_exports.into()).unwrap();
-
-        let expected_inner_exported_modules_keys = vec!["topFn".to_string()];
-        assert_eq!(inner_exports, expected_inner_exported_modules_keys);
 
         Ok(())
     }
