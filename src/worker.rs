@@ -333,7 +333,7 @@ mod tests {
 
         // res1 should return correct value ie 5 + 1
         assert_eq!(res1, 6);
-        // res2 should return correct value ie 5 + 1
+        // res2 should return correct value ie 5
         assert_eq!(res2, 5);
         // res3 should error
         matches!(res3, Err(Error::JsException(_)));
@@ -377,7 +377,7 @@ mod tests {
 
         // res1 should return correct value ie 5 + 1
         assert_eq!(res1, 6);
-        // res2 should return correct value ie 5 + 1
+        // res2 should return correct value ie 5
         assert_eq!(res2, 5);
         // res3 should error
         matches!(res3, Err(Error::JsException(_)));
