@@ -16,6 +16,7 @@ pub struct JsModule {
     pub id: ModuleId,
     pub mod_type: JsModuleType,
     pub exports: Vec<String>,
+    pub url: ModuleSpecifier,
 }
 
 impl JsModule {

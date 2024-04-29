@@ -1,7 +1,7 @@
 use std::{rc::Rc, sync::Arc};
 use crate::resolver::BasicNpmResolver;
 use crate::{
-    error::Error,
+    error::{Error, catch_exception},
     module::{JsModule, ModuleInitializer, JsModuleType},
 };
 use deno_runtime::{
@@ -110,14 +110,13 @@ globalThis.require = __internalCreateRequire____("{}");"#,
 
         // get export keys of main module
         let exports = {
-            let mod_namespace = main_worker
+            let module = main_worker
                 .js_runtime
                 .get_module_namespace(main_module_id)?;
             let mut scope = main_worker.js_runtime.handle_scope();
-            let mod_namespace = mod_namespace.open(&mut scope);
+            let module = module.open(&mut scope);
             if options.main_module_initializer.mod_type == JsModuleType::Esm {
-                let names =
-                    mod_namespace.get_property_names(&mut scope, GetPropertyNamesArgs::default());
+                let names = module.get_property_names(&mut scope, GetPropertyNamesArgs::default());
                 if let Some(v) = names {
                     from_v8::<Vec<String>>(&mut scope, v.into())?
                 } else {
@@ -128,7 +127,7 @@ globalThis.require = __internalCreateRequire____("{}");"#,
                 let default_key = v8::String::new(&mut scope, "default")
                     .ok_or(Error::FailedToGetV8Value)?
                     .into();
-                let default_export = mod_namespace
+                let default_export = module
                     .get(&mut scope, default_key)
                     .ok_or(Error::FailedToGetV8Value)?
                     .to_object(&mut scope)
@@ -149,17 +148,18 @@ globalThis.require = __internalCreateRequire____("{}");"#,
                 id: main_module_id,
                 mod_type: options.main_module_initializer.mod_type,
                 exports,
+                url: options.main_module_initializer.url,
             },
         })
     }
 
     /// get module object instance
     pub fn get_main_module_instance(&mut self) -> Result<v8::Global<v8::Object>, Error> {
-        let mod_namespace = self
+        let module = self
             .main_worker
             .js_runtime
             .get_module_namespace(self.main_module.id)?;
-        Ok(mod_namespace)
+        Ok(module)
     }
 
     /// get the export value
@@ -168,16 +168,71 @@ globalThis.require = __internalCreateRequire____("{}");"#,
             return Err(Error::UndefinedExport);
         }
 
-        let module = self.get_main_module_instance()?;
-        let mut scope = self.main_worker.js_runtime.handle_scope();
-        let module = module.open(&mut scope);
+        let mut module = self.get_main_module_instance()?;
+        let scope = &mut self.main_worker.js_runtime.handle_scope();
 
-        let key = v8::String::new(&mut scope, name).ok_or(Error::FailedToGetV8Value)?;
+        if self.main_module.mod_type == JsModuleType::Cjs {
+            let module_instance = module.open(scope);
+            let default_key = v8::String::new(scope, "default").ok_or(Error::FailedToGetV8Value)?;
+            let default_export = module_instance
+                .get(scope, default_key.into())
+                .ok_or(Error::FailedToGetV8Value)?;
+
+            let default_export = default_export
+                .to_object(scope)
+                .ok_or(Error::FailedToGetV8Value)?;
+
+            module = v8::Global::new(scope, default_export);
+        }
+
+        let module = module.open(scope);
+        let key = v8::String::new(scope, name).ok_or(Error::FailedToGetV8Value)?;
         let value = module
-            .get(&mut scope, key.into())
+            .get(scope, key.into())
             .ok_or(Error::FailedToGetV8Value)?;
 
-        Ok(v8::Global::new(&mut scope, value))
+        Ok(v8::Global::new(scope, value))
+    }
+
+    /// call js function
+    pub fn call_fn(
+        &mut self,
+        name: &str,
+        args: &[v8::Global<v8::Value>],
+    ) -> Result<v8::Global<v8::Value>, Error> {
+        let module = self.get_main_module_instance()?;
+        let function = self.get_export(name)?;
+
+        let scope = &mut self.main_worker.js_runtime.handle_scope();
+        let scope = &mut v8::TryCatch::new(scope);
+
+        let function: v8::Local<v8::Function> = v8::Local::new(scope, function).try_into()?;
+        let module = v8::Local::new(scope, module);
+        let mut local_args = vec![];
+        args.iter()
+            .for_each(|v| local_args.push(v8::Local::new(scope, v)));
+        let result = function.call(scope, module.into(), &local_args);
+
+        if let Some(v) = result {
+            Ok(v8::Global::new(scope, v))
+        } else {
+            Err(catch_exception(scope))
+        }
+    }
+
+    /// call an async js function and get the resolved/rejected results
+    pub async fn call_async_fn(
+        &mut self,
+        name: &str,
+        args: &[v8::Global<v8::Value>],
+    ) -> Result<v8::Global<v8::Value>, Error> {
+        let res = self.call_fn(name, args)?;
+        let future = self.main_worker.js_runtime.resolve(res);
+        Ok(self
+            .main_worker
+            .js_runtime
+            .with_event_loop_future(future, Default::default())
+            .await?)
     }
 }
 
@@ -199,12 +254,18 @@ mod tests {
             node_modules_url: None,
         };
         let js_worker = JsWorker::init(options, None).await?;
-        let expected_exported_modules_keys = vec!["topFn".to_string()];
+        let expected_exported_modules_keys = vec![
+            "asyncFnReject".to_string(),
+            "asyncFnResolve".to_string(),
+            "fnWithError".to_string(),
+            "topFn".to_string(),
+        ];
 
         assert_eq!(
             js_worker.main_module.exports,
             expected_exported_modules_keys
         );
+
         Ok(())
     }
 
@@ -223,11 +284,105 @@ mod tests {
         let js_worker = JsWorker::init(options, None).await?;
 
         // cjs modules always have default exports
-        let expected_exported_modules_keys = vec!["default".to_string(), "topFn".to_string()];
+        let expected_exported_modules_keys = vec![
+            "default".to_string(),
+            "topFn".to_string(),
+            "asyncFnResolve".to_string(),
+            "asyncFnReject".to_string(),
+            "fnWithError".to_string(),
+        ];
         assert_eq!(
             js_worker.main_module.exports,
             expected_exported_modules_keys
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_call_fn_esm() -> anyhow::Result<()> {
+        let options = JsWorkerInitOptions {
+            main_module_initializer: ModuleInitializer {
+                mod_type: JsModuleType::Esm,
+                url: ModuleSpecifier::from_file_path(
+                    std::env::current_dir().unwrap().join("data/esm.js"),
+                )
+                .unwrap(),
+            },
+            node_modules_url: None,
+        };
+        let mut js_worker = JsWorker::init(options, None).await?;
+        let arg = {
+            let scope = &mut js_worker.main_worker.js_runtime.handle_scope();
+            let arg: v8::Local<v8::Value> = v8::Integer::new(scope, 5).into();
+            v8::Global::new(scope, arg)
+        };
+
+        let res1 = js_worker.call_fn("topFn", &[arg.clone()]).unwrap(); // sync fn without erroring
+        let res2 = js_worker.call_async_fn("asyncFnResolve", &[arg]).await?; // async fn that will resolve
+        let res3 = js_worker.call_fn("fnWithError", &[]); // sync fn that will error
+        let res4 = js_worker.call_async_fn("asyncFnReject", &[]).await; // async fn that will reject
+
+        let scope = &mut js_worker.main_worker.js_runtime.handle_scope();
+
+        let res1 = v8::Local::new(scope, res1);
+        let res1 = from_v8::<u32>(scope, res1)?;
+
+        let res2 = v8::Local::new(scope, res2);
+        let res2 = from_v8::<u32>(scope, res2)?;
+
+        // res1 should return correct value ie 5 + 1
+        assert_eq!(res1, 6);
+        // res2 should return correct value ie 5 + 1
+        assert_eq!(res2, 5);
+        // res3 should error
+        matches!(res3, Err(Error::JsException(_)));
+        // res4 should error
+        matches!(res4, Err(Error::DenoError(_)));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_call_fn_cjs() -> anyhow::Result<()> {
+        let options = JsWorkerInitOptions {
+            main_module_initializer: ModuleInitializer {
+                mod_type: JsModuleType::Cjs,
+                url: ModuleSpecifier::from_file_path(
+                    std::env::current_dir().unwrap().join("data/cjs.js"),
+                )
+                .unwrap(),
+            },
+            node_modules_url: None,
+        };
+        let mut js_worker = JsWorker::init(options, None).await?;
+        let arg = {
+            let scope = &mut js_worker.main_worker.js_runtime.handle_scope();
+            let arg: v8::Local<v8::Value> = v8::Integer::new(scope, 5).into();
+            v8::Global::new(scope, arg)
+        };
+
+        let res1 = js_worker.call_fn("topFn", &[arg.clone()]).unwrap(); // sync fn without erroring
+        let res2 = js_worker.call_async_fn("asyncFnResolve", &[arg]).await?; // async fn that will resolve
+        let res3 = js_worker.call_fn("fnWithError", &[]); // sync fn that will error
+        let res4 = js_worker.call_async_fn("asyncFnReject", &[]).await; // async fn that will reject
+
+        let scope = &mut js_worker.main_worker.js_runtime.handle_scope();
+
+        let res1 = v8::Local::new(scope, res1);
+        let res1 = from_v8::<u32>(scope, res1)?;
+
+        let res2 = v8::Local::new(scope, res2);
+        let res2 = from_v8::<u32>(scope, res2)?;
+
+        // res1 should return correct value ie 5 + 1
+        assert_eq!(res1, 6);
+        // res2 should return correct value ie 5 + 1
+        assert_eq!(res2, 5);
+        // res3 should error
+        matches!(res3, Err(Error::JsException(_)));
+        // res4 should error
+        matches!(res4, Err(Error::DenoError(_)));
 
         Ok(())
     }
