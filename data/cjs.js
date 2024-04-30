@@ -9,12 +9,12 @@ function fnWithError() {
 }
 
 async function asyncFnResolve(num) {
-  await sleep(1000);
+  await sleep(100);
   return Promise.resolve(num);
 }
 
 async function asyncFnReject() {
-  await sleep(1000);
+  await sleep(100);
   return Promise.reject(new Error("rejected"));
 }
 
