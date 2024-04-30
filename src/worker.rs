@@ -200,18 +200,17 @@ globalThis.require = __internalCreateRequire____("{}");"#,
         name: &str,
         args: &[v8::Global<v8::Value>],
     ) -> Result<v8::Global<v8::Value>, Error> {
-        let module = self.get_main_module_instance()?;
         let function = self.get_export(name)?;
 
         let scope = &mut self.main_worker.js_runtime.handle_scope();
         let scope = &mut v8::TryCatch::new(scope);
+        let undefined = v8::undefined(scope).into();
 
         let function: v8::Local<v8::Function> = v8::Local::new(scope, function).try_into()?;
-        let module = v8::Local::new(scope, module);
         let mut local_args = vec![];
         args.iter()
             .for_each(|v| local_args.push(v8::Local::new(scope, v)));
-        let result = function.call(scope, module.into(), &local_args);
+        let result = function.call(scope, undefined, &local_args);
 
         if let Some(v) = result {
             Ok(v8::Global::new(scope, v))
