@@ -212,11 +212,9 @@ globalThis.require = __internalCreateRequire____("{}");"#,
             .for_each(|v| local_args.push(v8::Local::new(scope, v)));
         let result = function.call(scope, undefined, &local_args);
 
-        if let Some(v) = result {
-            Ok(v8::Global::new(scope, v))
-        } else {
-            Err(catch_exception(scope))
-        }
+        result
+            .map(|v| v8::Global::new(scope, v))
+            .ok_or(catch_exception(scope))
     }
 
     /// call an async js function and get the resolved/rejected results
