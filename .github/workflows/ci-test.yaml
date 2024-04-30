@@ -2,7 +2,7 @@ name: Rustjs CI
 on: [push]
 
 jobs:
-  fmt-clippy-test:
+  test-clippy-fmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -10,11 +10,11 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@v4
       - uses: DeterminateSystems/magic-nix-cache-action@v2
 
-      - name: fmt
-        run: nix develop -c cargo fmt --all -- --check
+      - name: test
+        run: nix develop -c cargo test
 
       - name: clippy
         run: nix develop -c cargo clippy --all-targets --all-features -- -D clippy::all
 
-      - name: test
-        run: nix develop -c cargo test
+      - name: fmt
+        run: nix develop -c cargo fmt --all -- --check
