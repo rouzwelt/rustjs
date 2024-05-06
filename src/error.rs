@@ -32,8 +32,8 @@ pub enum Error {
     #[error("an unexpected error occured")]
     UnexpectedError,
 
-    #[error("js exception: {}", 0.0)]
-    JsException((String, Option<serde_json::Value>)),
+    #[error("js exception: {0}")]
+    JsException(String),
 }
 
 pub fn catch_exception(
@@ -46,7 +46,7 @@ pub fn catch_exception(
             .map(|value| value.to_rust_string_lossy(try_catch_scope))
             .unwrap_or_else(|| "no exception".into());
 
-        return Error::JsException((msg, None));
+        return Error::JsException(msg);
     }
     Error::UnexpectedError
 }
