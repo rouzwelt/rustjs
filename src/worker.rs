@@ -130,13 +130,14 @@ globalThis.require = __internalCreateRequire____("{}");"#,
                 let default_export = module
                     .get(&mut scope, default_key)
                     .ok_or(Error::FailedToGetV8Value)?
-                    .to_object(&mut scope)
-                    .ok_or(Error::FailedToGetV8Value)?;
-                let inner_exports = default_export
-                    .get_property_names(&mut scope, GetPropertyNamesArgs::default())
-                    .ok_or(Error::FailedToGetV8Value)?;
-                let inner_exports = from_v8::<Vec<String>>(&mut scope, inner_exports.into())?;
-                all_exports.extend_from_slice(&inner_exports);
+                    .to_object(&mut scope);
+                if let Some(default_export) = default_export {
+                    let inner_exports = default_export
+                        .get_property_names(&mut scope, GetPropertyNamesArgs::default())
+                        .ok_or(Error::FailedToGetV8Value)?;
+                    let inner_exports = from_v8::<Vec<String>>(&mut scope, inner_exports.into())?;
+                    all_exports.extend_from_slice(&inner_exports);
+                }
                 all_exports
             }
         };
