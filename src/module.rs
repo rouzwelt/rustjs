@@ -16,11 +16,12 @@ pub struct JsModule {
     pub id: ModuleId,
     pub mod_type: JsModuleType,
     pub exports: Vec<String>,
+    pub url: ModuleSpecifier,
 }
 
 impl JsModule {
-    pub fn export_exists(&self, key: &String) -> bool {
-        self.exports.contains(key)
+    pub fn export_exists(&self, key: &str) -> bool {
+        self.exports.contains(&key.to_string())
     }
 }
 
