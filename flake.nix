@@ -15,7 +15,7 @@
         inherit system overlays;
       };
 
-      rust-version = "1.75.0";
+      rust-version = "1.76.0";
       rust-toolchain = pkgs.rust-bin.stable.${rust-version}.default;
 
     in {
